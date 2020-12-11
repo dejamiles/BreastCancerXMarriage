@@ -1,0 +1,90 @@
+---
+title: "ADA Final Project - Table 1"
+author: "DMiles"
+date: "12/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Data
+
+```{r}
+pacman::p_load(survival, survminer, tidyverse, readr, lmtest, table1)
+breast <- read_csv("ADA_Final_Project.csv") 
+
+#shorten variable names
+names(breast)<-c("ID", "marital","race", "insurance", "age_dx",
+               "year_dx", "surv_mo", "cause_spec_death")
+
+breast <- breast %>%
+
+#recode marriage variable to factor function
+  mutate(marital_binary = case_when(marital %in% c("Married (including common law)") ~ 0,
+                                     marital %in% c("Single (never married)", "Divorced", "Unknown", "Widowed") ~ 1),
+         marital_binary  = factor(marital_binary , 0:1, c("Married", "Unmarried")),
+#Recode cause specific death as 1/0 if the person died/did not die of breast cancer     
+    event_f=case_when(cause_spec_death=="Dead (attributable to this cancer dx)" ~ 1,
+                           cause_spec_death %in% c("Alive or dead of other cause", "N/A not first tumor") ~0),
+         
+         #Recode insurance status as a factor variable and label it
+         insurance_f=factor(insurance, levels=c("Insured", "Insured/No specifics", "Any Medicaid", "Uninsured")),
+         
+         #Convert survival months to numeric variables
+         surv_mo=as.numeric(surv_mo))
+  
+#label the group variable
+breast$marital<-factor(breast$marital,
+      levels = c(0,1),
+      labels = c("Married", "Unmarried"))
+
+#Exclude diagnosis years before 2007
+breast<-breast[which(breast$year_dx>2006),]
+
+#Exclude missing values 
+breast <- breast %>%
+  select(marital_binary, insurance_f, surv_mo, event_f, race, age_dx) %>%
+  na.omit() %>% as.data.frame()
+```
+
+## Table Function
+```{r}
+table1(~marital_binary + insurance_f + surv_mo  + event_f + race + age_dx, breast)
+```
+
+# Adding labels to the variables
+```{r}
+label(breast$marital_binary)<-"Marital Status"
+label(breast$insurance_f)<-"Insured at Diagnosis"
+label(breast$surv_mo)<-"Survival time (months)"
+label(breast$event_f)<-"Diagnosed with Breast Cancer"
+label(breast$race)<-"Race"
+label(breast$age_dx)<-"Age at diagnosis (years)"
+
+table1(~insurance_f + surv_mo  + event_f + race + age_dx|marital_binary, breast)
+```
+
+# Adding a label to the overall column "Total" with the overall argument
+```{r}
+table1(~age + sex + race + stage_f  + surv_mo + vital_stat|insurance_f, overall="Total", cerv)
+```
+
+# Adding a 'Variable' label to the first column with the rowlabelhead argument
+```{r}
+table1(~insurance_f + surv_mo  + event_f + race + age_dx|marital_binary, overall="Total", rowlabelhead="Variable", breast)
+```
+
+# Adding a footnote to the table with the footnote argument
+```{r}
+table1(~insurance_f + surv_mo  + event_f + race + age_dx|marital_binary, overall="Total", footnote='SD = standard deviation', breast)
+```
+# Interpret Info above. Incorrect interpretations below. 
+
+#Age: Those who were married were older on average than those who were unmarried with mean ages of 43.7 (sd=5.25), 49.0 (sd=14.2), and 50.7 (sd=15.0) respectively. Those who were uninsured and who had any Medicaid had median ages that were younger than those who were privately insured at diagnosis with median ages of 48, 48, and 49 respectively. 
+
+#Race: A higher percentage of those who were uninsured and who had Any Medicaid were Hispanic and Non-Hispanic Blacks than those who were privately insured at diagnosis (Hispanic: 34.9%, 33.3% vs. 15.3%; Non-Hispanic Black: 18.9%, 16.7% vs. 11%). The opposite pattern was observed for Non-Hispanic Whites with a lower percentage being reported as uninsured and having Any Medicaid vs. privately insurance at diagnosis (38.9%, 38.1% vs. 63.1%).
+
+#Insurance: Those who were uninsured and who had any Medicaid were younger on average than those who were insured with mean ages of 47.9 (sd=11.8), 49.0 (sd=14.2), and 50.7 (sd=15.0) respectively. Those who were uninsured and who had any Medicaid had median ages that were younger than those who were privately insured at diagnosis with median ages of 48, 48, and 49 respectively.
+
