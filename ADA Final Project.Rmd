@@ -1,0 +1,166 @@
+---
+title: "ADA Final Project"
+author: "Déjà Miles"
+date: "11/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Install/Load Packages 
+```{r cars}
+pacman::p_load(survminer,survival,tidyverse,lmtest,foreign, tidyverse, survRM2, haven, gtools, magrittr, mlr)
+
+library("dplyr")
+library("pillar")
+library("survival")
+library("ggplot2")
+library("survminer")
+```
+
+## Import Data & Data Management
+```{r cars}
+#Import the data 
+breast <- read.csv("C:\\Users\\deja.miles\\Desktop\\ADA_Final_Project.csv", header = TRUE)
+breast <- BreastCancer.x.Marriage
+breast2 <- BreastCancer.x.Marriage #data used to check assumptions 
+
+#shorten variable names
+names(breast)<-c("ID", "marital","race", "insurance", "age_dx",
+               "year_dx", "surv_mo", "cause_spec_death")
+
+breast <- breast %>%
+
+#recode marriage variable to factor function
+  mutate(marital_binary = case_when(marital %in% c("Married (including common law)") ~ 0,
+                                     marital %in% c("Single (never married)", "Divorced", "Unknown", "Widowed") ~ 1),
+         marital_binary  = factor(marital_binary , 0:1, c("Married", "Unmarried")),
+#Recode cause specific death as 1/0 if the person died/did not die of breast cancer     
+    event_f=case_when(cause_spec_death=="Dead (attributable to this cancer dx)" ~ 1,
+                           cause_spec_death %in% c("Alive or dead of other cause", "N/A not first tumor") ~0),
+         
+         #Recode insurance status as a factor variable and label it
+         insurance_f=factor(insurance, levels=c("Insured", "Insured/No specifics", "Any Medicaid", "Uninsured")),
+         
+         #Convert survival months to numeric variables
+         surv_mo=as.numeric(surv_mo))
+  
+#label the group variable
+breast$marital<-factor(breast$marital,
+      levels = c(0,1),
+      labels = c("Married", "Unmarried"))
+
+#Check variables for correct categorization 
+table(breast$marital_binary)
+table(breast$cause_spec_death, breast$event_f)
+table(breast$insurance, breast$insurance_f)
+
+#Exclude diagnosis years before 2007
+breast<-breast[which(breast$year_dx>2006),]
+
+#Exclude missing values 
+breast <- breast %>%
+  select(marital_binary, insurance_f, surv_mo, event_f) %>%
+  na.omit() %>% as.data.frame()
+```
+## Which group has a higher hazard of breast cancer obtention & mortality based on relationship status - married or unmarried? Univariate Cox model to examine the association between marital status and breast cancer mortality.
+```{r}
+breast.marriage<-coxph(Surv(surv_mo, event_f)~marital_binary, breast, ties="efron") 
+summary(breast.marriage)
+
+breast.marriage<-coxph(Surv(surv_mo, event_f)~marital_binary, breast, ties="breslow") 
+summary(breast.marriage)
+
+#Interpretation of results: Those who were unmarried were 1.65 times more likely (95% CI 0.58-1.71) to experience breast cancer mortality. 
+```
+
+## Adjust the Cox model for insurance_f and interpret the results.
+```{r}
+breast.marriage_adj.mod<-coxph(Surv(surv_mo, event_f)~marital_binary + insurance_f, breast)
+summary(breast.marriage_adj.mod)
+
+#Interpretation: After adjusting for insurance_f, those who were not married had a 1.36 (95% CI 1.30-1.41) times higher hazard of breast cancer mortality than those who were married.
+```
+
+## Compare nested models using the likelihood ratio test (a measure of model fit) and interpret the findings. 
+```{r}
+lrtest(breast.marriage, breast.marriage_adj.mod)
+#The likelihood ratio test indicates that the model that includes insurance_f does not significantly improve the fit compared to the model with just marriage (p < 2 x e-16). 
+```
+
+## Include an interaction term in the model between event_f and insurance_f to see if there is effect modification of the hazard of breast cancer motality in those who were not married vs. unmarried according to their insurance_f. 
+```{r}
+breast.marriage.mod<-coxph(Surv(surv_mo, event_f)~marital_binary + insurance_f + insurance_f*marital_binary, breast)
+
+summary(breast.marriage.mod)
+
+#Interpretation: There is no significant effect modification (p for interaction=0.926) of the HR for the association between marriage and breast cancer mortality by insurance.
+```
+
+## Plot survival curves adjusted for mean insurance_f
+```{r message=FALSE, warning=FALSE}
+# method = mariginal: balance the data set and then compute results on the adjusted data
+ggadjustedcurves(breast.marriage_adj.mod, data = breast, method = "marginal", variable = "marital_binary", ggtheme = theme_minimal())
+
+#method = conditional: compute a predicted survival curve for each subject that accounts for each of the confounder, and then take a weighted average of the curves to get an overall estimate for each rx group
+ggadjustedcurves(breast.marriage_adj.mod, data = breast, method = "conditional", variable = "marital_binary", ggtheme = theme_minimal())
+
+#We can see from these curves after adjusting for insurance_f, that at almost all time points there is a higher survival probability in the married group than in the unmarried group.
+
+#Compared to the unadjusted KM curves
+breast.surv <- survfit(Surv(surv_mo, event_f)~marital_binary, breast)
+
+ggsurvplot(breast.surv, data = breast, conf.int=FALSE, ggtheme = theme_minimal(), tables.theme = clean_theme())
+
+```
+## Testing Proportional Hazard Assumptions
+## Checking PH assumption in leukemia data
+```{r}
+#Look at the variables
+dput(names(breast))
+
+#Cox PH regression
+Coxmod<-coxph(Surv(surv_mo, event_f)~marital_binary + insurance_f, breast, ties="efron")
+
+#Display the model results
+summary(Coxmod)
+#Interpretation: After adjusting for covariates, individuals who are unmarried have 2.664 (95% CI 2.44-2.90) times higher hazard of breast cancer mortality than married individuals.
+```
+
+## 1. Log-log curves: log(-log(survival)) against log(time)
+```{r}
+#Check PH assumption using log-log survival curves--the curves should be parallel
+breastsurv <- Surv(breast$surv_mo, breast$event_f)
+breastsurv
+
+plot(survfit(breastsurv ~ breast$event_f), col=c("black", "red"), main= "event_f log log plot", fun="cloglog", xlab="Time", ylab="log(-log(S(t)))") #ph assumption not violated
+
+plot(survfit(breastsurv ~ breast$surv_mo), col=c("black", "red"), main="surv_mo log log plot", fun="cloglog", xlab="Time", ylab="log(-log(S(t)))") #ph assumption violated
+```
+
+## 2. Schoenfeld goodness-of-fit test 
+```{r}
+#Check PH assumption using the Schoenfeld goodness-of-fit test 
+#The global p-value tells whether the ph assumption is violated for any of the covariates. 
+#You want this test to be non-significant. 
+#For more information on this test: https://www.r-bloggers.com/cox-model-assumptions/
+#Terms: do the test for each term in the model rather than for each separate covariate if TURE
+test.ph <- cox.zph(breast.marriage_adj.mod, terms = FALSE)
+test.ph
+
+#From the output above, the test is not statistically significant for each of the covariates, and the global test is also not statistically significant. Therefore, we can assume the proportional hazards.
+```
+
+## 3. Schoenfeld residuals plots
+```{r}
+plot(test.ph, resid=FALSE)
+
+#The residuals for married vs unmarried is independent of time. The output is not horizontal and there is no pattern in the smoothed black line. Therefore, we can assume the PH assumption is met. 
+
+ggcoxzph(test.ph)
+
+# According to the residual plot, there is no special patterns or departures away from the horizontal line. The proportional hazard assumption may be acceptable. 
+```
+

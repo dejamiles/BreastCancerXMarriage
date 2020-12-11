@@ -1,0 +1,169 @@
+---
+title: "EM and contrast demo"
+author: "Kim Johnson"
+date: "11/5/2020"
+output: html_document
+---
+
+# Load packages and libraries
+```{r, eval=FALSE}
+#install.packages("survminer") 
+#install.packages("ggfortify")
+#install.packages("haven")
+#install.packages("multcomp")
+library(tidyverse) #for various packages
+library(haven) #for read_csv
+library(multcomp)
+library(lmtest)
+
+#load data for this exercise
+
+cerv<- read_csv("SEERcerv2004to2015.csv") #load data for this exercise
+```
+
+```{r}
+#provide shorter names for variables
+names(cerv)<-c("ID", "age_category","yr_dx", "sex", "race",
+               "insurance", "marital", "%pov", "%edu", "cause_spec_death", 
+               "first_primary", "surv_mo", "vital_stat", "Stage") 
+
+
+#Recode cause specific death as 1/0 if the person died/did not die of cervical cancer 
+cerv$event_f[
+    cerv$cause_spec_death=="Dead (attributable to this cancer dx)"]<-1
+cerv$event_f[
+    cerv$cause_spec_death=="Alive or dead of other cause"|
+    cerv$cause_spec_death=="N/A not first tumor"]<-0
+
+#Recode insurance status as a factor variable and label it
+cerv$insurance_f[
+  cerv$insurance=="Insured"]<-0
+cerv$insurance_f[
+ cerv$insurance=="Any Medicaid"]<-1
+cerv$insurance_f[
+  cerv$insurance=="Uninsured"]<-2
+cerv$insurance_f<-factor(cerv$insurance_f,
+      levels = c(0,1,2),
+      labels = c("Insured", "Any Medicaid", "Uninsured"))
+
+#Recode race
+cerv$race[
+  cerv$race=="Non-Hispanic White"]<-0
+cerv$race[
+ cerv$race=="Non-Hispanic Black"]<-1
+cerv$race[
+ cerv$race=="Hispanic (All Races)"]<-2
+cerv$race<-factor(cerv$race,
+      levels = c(0,1,2),
+      labels = c("White", "Black", "Hispanic"))
+
+cerv$surv_mo<-as.numeric(cerv$surv_mo)
+```
+
+# Complete case analysis exclusions, exclude missing data
+```{r}
+cerv<-cerv[which(!is.na(cerv$race) & !is.na(cerv$insurance_f) & !is.na(cerv$event_f) & !is.na(cerv$surv_mo)),]
+```
+
+# Run Cox models to test the hypothesis that race modifies the association between insurance and the hazard of death.
+```{r}
+#Model with insurance and race
+insurance_mod_race<-coxph(Surv(surv_mo, event_f)~insurance_f + race, cerv)
+summary(insurance_mod_race)
+
+#Model with insurance and race*insurance
+insurance_mod_raceint<-coxph(Surv(surv_mo, event_f)~insurance_f + race +race*insurance_f, cerv)
+summary(insurance_mod_raceint)
+
+#Test the hypothesis with the lrtest
+lrtest(insurance_mod_race, insurance_mod_raceint)
+```
+
+# The interaction is significant, so the next step is to run models stratified by race
+```{r}
+#Whites
+insurance_mod<-coxph(Surv(surv_mo, event_f)~insurance_f, cerv[which(cerv$race=="White"),])
+summary(insurance_mod)
+
+#Blacks
+insurance_mod_black<-coxph(Surv(surv_mo, event_f)~insurance_f, cerv[which(cerv$race=="Black"),])
+summary(insurance_mod_black)
+
+#Hispanics
+insurance_mod_hispanic<-coxph(Surv(surv_mo, event_f)~insurance_f, cerv[which(cerv$race=="Hispanic"),])
+summary(insurance_mod_hispanic)
+
+```
+
+# Using contrasts to compare different combinations of race/ethnicity  and insurance
+```{r}
+#Let's answer the question-Is the hazard of death for those with Medicaid different between Blacks and Hispanics? We can use the model above starting on line 75 to answer this question using contrasts. 
+
+#lets rerun the summary of the model
+summary(insurance_mod_raceint)
+
+#First we need to create a contrast vector that tests the null hypotheses of differences in the log hazard between these two groups (Blacks with Medicaid vs. Hispanics with Medicaid).  
+
+#There are 8 values in our contrast vector, 1 for each coefficient in the model. 
+
+#Let's determine the values to use in our contrast vector in excel--go to the excel sheet
+
+#We will use these values and the coefficients to solve the equation below that calculates the difference in the log hazard of death between Blacks with Medicaid and Hispanics with Medicaid. 
+
+#log_hazard= insurance_fAnyMedicaid*0 + insurance_fUninsured*0 + raceBlack*1 + raceHispanic*-1 + insurance_fAnyMedicaid:raceBlack*1 + insurance_fUninsured:raceBlack*0 + insurance_fAnyMedicaid:raceHispanic*-1 + insurance_fUninsured:raceHispanic*1 
+
+#Then we will exponentiate the log hazard to get the hazard ratio of death in Blacks with Medicaid compared to Hispanics with Medicaid. 
+
+#exp(insurance_fAnyMedicaid*0 + insurance_fUninsured*0 + raceBlack*1 + raceHispanic*-1 + insurance_fAnyMedicaid:raceBlack*1 + insurance_fUninsured:raceBlack*0 + insurance_fAnyMedicaid:raceHispanic*-1 + insurance_fUninsured:raceHispanic*1)
+
+#Three different methods to solve the equation above on line 113 and 117 are below using R code are shown below.
+```
+
+# Method 1: plug in the coefficient values and constrast values into the formula (error prone and not reproducible if any changes to the dataset or model are made)
+```{r}
+log_hazard= (0.55756*0) + (0.72588*0) + (0.41809*1) + (-0.03708*-1) + (-0.24307*1) + (-0.25975*0) + (-0.24308*-1) + (-0.44640*0)
+exp(log_hazard)
+```
+
+# Method 2: extract coefficient values and plug them and the contrast values into the formula (slightly less error prone)
+```{r}
+log_hazard= (summary(insurance_mod_raceint)$coefficients[1,1]*0) + (summary(insurance_mod_raceint)$coefficients[2,1]*0) + (summary(insurance_mod_raceint)$coefficients[3,1]*1) + (summary(insurance_mod_raceint)$coefficients[4,1]*-1) + (summary(insurance_mod_raceint)$coefficients[5,1]*1) + (summary(insurance_mod_raceint)$coefficients[6,1]*0) + (summary(insurance_mod_raceint)$coefficients[7,1]*-1) + (summary(insurance_mod_raceint)$coefficients[8,1]*0)
+exp(log_hazard)
+```
+
+# Method 3: Using the multcomp package (even more less error prone)
+```{r}
+#There is a simpler way to do this creating a matrix of the values that will be multiplied by each coefficient and using that matrix with the general linear Hypothesis testing function (glht)
+X<-matrix(c(0,  0, 1, -1, 1,  0, -1, 0),1)
+
+t <- glht(insurance_mod_raceint, linfct = X) #linfct is the linear hypothesis to be tested as specified by X the matrix. In this case, we hypothesize that there is no difference in the hazard of death from cervical cancer between Blacks with Medicaid and Hispanics with Medicaid.
+summary(t) #here are the results
+
+#We can get the HR by exponentiating the coefficient
+HRblack<-exp(0.4552)
+HRblack
+
+#We can also got 95% CI using the confint function
+CI<-confint(t)
+CI
+lowCIblack<-exp(0.3431)
+highCIblack<-exp(0.5673)
+lowCIblack
+highCIblack
+
+#We can create a nice table with the HR and 95% CIs
+table1<-data.frame(matrix(ncol=5, nrow=0)) #create the table
+columns<-c("Race/Ethnicity", "Insurance", "HR",  "LowerCI", "UpperCI") #label the columns with names
+colnames(table1)<-columns
+#Plug in the data below
+table1[1,]<-c('Hispanic',  'Medicaid', 1.0, "ref" , "ref")
+table1[2,]<-c('Black',  'Medicaid', format(HRblack, digits=3), format(lowCIblack, digits=3), format(highCIblack, digits=3))
+table1
+```
+
+
+```{r}
+#For more information: https://stats.idre.ucla.edu/r/faq/how-can-i-test-contrasts-in-r/ 
+```
+
+

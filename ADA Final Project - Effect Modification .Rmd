@@ -1,0 +1,105 @@
+---
+title: "ADA Final Project - Effect Modification"
+author: "DMiles"
+date: "12/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+
+```{r}
+library(tidyverse) #for various packages
+library(haven) #for read_csv
+library(multcomp)
+library(lmtest)
+
+breast <- read_csv("ADA_Final_Project.csv") 
+```
+# Data Management
+```{r}
+#shorten variable names
+names(breast)<-c("ID", "marital","race", "insurance", "age_dx",
+               "year_dx", "surv_mo", "cause_spec_death")
+
+breast <- breast %>%
+
+#recode marriage variable to factor function
+  mutate(marital_binary = case_when(marital %in% c("Married (including common law)") ~ 0,
+                                     marital %in% c("Single (never married)", "Divorced", "Unknown", "Widowed") ~ 1),
+         marital_binary  = factor(marital_binary , 0:1, c("Married", "Unmarried")),
+#Recode cause specific death as 1/0 if the person died/did not die of breast cancer     
+    event_f=case_when(cause_spec_death=="Dead (attributable to this cancer dx)" ~ 1,
+                           cause_spec_death %in% c("Alive or dead of other cause", "N/A not first tumor") ~0),
+         
+         #Recode insurance status as a factor variable and label it
+         insurance_f=factor(insurance, levels=c("Insured", "Insured/No specifics", "Any Medicaid", "Uninsured")),
+         
+         #Convert survival months to numeric variables
+         surv_mo=as.numeric(surv_mo))
+  
+#label the group variable
+breast$marital<-factor(breast$marital,
+      levels = c(0,1),
+      labels = c("Married", "Unmarried"))
+
+#Exclude diagnosis years before 2007
+breast<-breast[which(breast$year_dx>2006),]
+
+#Exclude missing values 
+breast <- breast %>%
+  select(marital_binary, insurance_f, surv_mo, event_f, race, age_dx) %>%
+  na.omit() %>% as.data.frame()
+```
+
+# Run Cox models to test the hypothesis that insurance modifies the association between marital status and breast cancer.
+```{r}
+#Model with insurance and marriage
+insurance_mod_marital<-coxph(Surv(surv_mo, event_f)~insurance_f + marital_binary, breast)
+summary(insurance_mod_marital)
+
+#Model with insurance and marriage*insurance
+insurance_mod_maritalint<-coxph(Surv(surv_mo, event_f)~insurance_f + marital_binary +marital_binary*insurance_f, breast)
+summary(insurance_mod_maritalint)
+
+#Test the hypothesis with the lrtest
+lrtest(insurance_mod_marital, insurance_mod_maritalint)
+```
+
+# The interaction is significant (0.00046), so the next step is to run models stratified by insurance type. 
+```{r}
+#Insured
+insured_marital<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$insurance_f=="Insured"),])
+summary(insured_marital)
+
+#Insured/ No specifics
+insured_nospecific_marital<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$insurance_f=="Insured/No specifics"),])
+summary(insured_nospecific_marital)
+
+#Any Medicaid 
+anymedicaid_marital<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$insurance_f=="Any Medicaid"),])
+summary(anymedicaid_marital)
+
+#Uninsured
+uninsured_marital<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$insurance_f=="Uninsured"),])
+summary(uninsured_marital)
+```
+
+# Also, run models stratified by race (For Fun)
+```{r}
+#Whites
+insurance_mod<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$race=="Non-Hispanic White"),])
+summary(insurance_mod)
+
+#Blacks
+insurance_mod_black<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$race=="Non-Hispanic Black"),])
+summary(insurance_mod_black)
+
+#Hispanics
+insurance_mod_hispanic<-coxph(Surv(surv_mo, event_f)~insurance_f, breast[which(breast$race=="Hispanic (All Races)"),])
+summary(insurance_mod_hispanic)
+
+```
